@@ -1,0 +1,4 @@
+build
+dist
+wsproxy.egg*
+__pycache__
