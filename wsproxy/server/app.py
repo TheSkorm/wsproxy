@@ -8,6 +8,7 @@ import logging
 import traceback
 import json
 import zlib
+from http import HTTPStatus
 
 import websockets
 from wsproxy.common.version import getVersion
@@ -36,12 +37,16 @@ async def msgHandler(websocket, path, remoteUrl: str):
 
     try:
         url = remoteUrl + path
-        async with websockets.connect(url) as ws:
+        async with websockets.connect(url, subprotocols=["mqtt"]) as ws:
             taskA = asyncio.create_task(clientToServer(ws, websocket))
             taskB = asyncio.create_task(serverToClient(ws, websocket))
 
-            await taskA
-            await taskB
+            done, pending = await asyncio.wait(
+            [taskA, taskB],
+            return_when=asyncio.FIRST_COMPLETED)
+            remaining = pending.pop()
+            remaining.cancel()
+            await remaining
 
     except websockets.exceptions.ProtocolError as e:
         print(e)
@@ -67,6 +72,8 @@ class ServerProtocol(websockets.WebSocketServerProtocol):
 
     async def process_request(self, path, request_headers):
         self.requestHeaders = request_headers
+        if path == "/health":
+            return (HTTPStatus.OK, {}, "meow meow meow".encode())
         return await super().process_request(path, request_headers)
 
     async def read_message(self):
@@ -113,7 +120,8 @@ class AppRunner:
                 handler,
                 self.host,
                 self.port,
-                create_protocol=ServerProtocol
+                create_protocol=ServerProtocol,
+                subprotocols=["mqtt","mqttv3.1"]
             ) as self.server:
                 await stop
                 self.closeRedis()
@@ -123,7 +131,8 @@ class AppRunner:
                 handler,
                 self.host,
                 self.port,
-                create_protocol=ServerProtocol
+                create_protocol=ServerProtocol,
+                subprotocols=["mqtt","mqttv3.1"]
             )
 
     def run(self, stop):
